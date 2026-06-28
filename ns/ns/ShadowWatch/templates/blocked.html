@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="page-title">Blocked IPs</h1>
+
+<div class="panel">
+  <div class="panel-header">Manual Block</div>
+  <div class="panel-body">
+    <div id="block-msg" class="alert-msg"></div>
+    <div class="form-group">
+      <label>IP Address</label>
+      <input type="text" id="block-ip" placeholder="203.0.113.50">
+    </div>
+    <div class="form-group">
+      <label>Reason</label>
+      <textarea id="block-reason" rows="2" placeholder="Reason for blocking..."></textarea>
+    </div>
+    <button class="btn" id="btn-manual-block">Block IP</button>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="panel-header">Active Blocked IPs</div>
+  <div class="panel-body" style="padding:0">
+    <table class="data" id="active-blocked">
+      <thead><tr><th>IP</th><th>Blocked At</th><th>Blocked By</th><th>Reason</th><th>Action</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="panel-header">Unblock History</div>
+  <div class="panel-body" style="padding:0">
+    <table class="data" id="history-blocked">
+      <thead><tr><th>IP</th><th>Blocked At</th><th>Unblocked At</th><th>Reason</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  function showMsg(ok, text) {
+    const el = document.getElementById('block-msg');
+    el.className = 'alert-msg show ' + (ok ? 'ok' : 'err');
+    el.textContent = text;
+  }
+
+  function loadBlocked() {
+    SW.fetchJson('/api/blocked?active_only=1').then(function (rows) {
+      const tb = document.querySelector('#active-blocked tbody');
+      tb.innerHTML = rows.map(function (r) {
+        return '<tr><td class="mono">' + SWTables.esc(r.ip_address) + '</td>' +
+          '<td class="mono">' + SWTables.esc(r.blocked_at) + '</td>' +
+          '<td>' + SWTables.esc(r.blocked_by) + '</td>' +
+          '<td>' + SWTables.esc(r.reason || '') + '</td>' +
+          '<td><button class="btn btn-sm btn-outline btn-unblock" data-ip="' + SWTables.esc(r.ip_address) + '">Unblock</button></td></tr>';
+      }).join('') || '<tr><td colspan="5" class="muted">No active blocks</td></tr>';
+    });
+    SW.fetchJson('/api/blocked?active_only=0').then(function (rows) {
+      const hist = rows.filter(function (r) { return !r.is_active; });
+      const tb = document.querySelector('#history-blocked tbody');
+      tb.innerHTML = hist.map(function (r) {
+        return '<tr style="color:#999999"><td class="mono">' + SWTables.esc(r.ip_address) + '</td>' +
+          '<td class="mono">' + SWTables.esc(r.blocked_at) + '</td>' +
+          '<td class="mono">' + SWTables.esc(r.unblocked_at || '—') + '</td>' +
+          '<td>' + SWTables.esc(r.reason || '') + '</td></tr>';
+      }).join('') || '<tr><td colspan="4" class="muted">No history</td></tr>';
+    });
+  }
+
+  document.getElementById('btn-manual-block').addEventListener('click', function () {
+    const ip = document.getElementById('block-ip').value.trim();
+    const reason = document.getElementById('block-reason').value.trim() || 'Manual block';
+    SW.fetchJson('/api/block', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ip: ip, reason: reason}) })
+      .then(function (r) {
+        showMsg(r.success, r.message || (r.success ? 'Blocked' : 'Failed'));
+        SW.toast(r.success ? 'success' : 'error', r.message || (r.success ? 'IP blocked' : 'Block failed'));
+        if (r.success) loadBlocked();
+      })
+      .catch(function () { showMsg(false, 'Request failed'); SW.toast('error', 'Request failed'); });
+  });
+
+  document.addEventListener('click', function (e) {
+    if (e.target.classList.contains('btn-unblock')) {
+      const ip = e.target.getAttribute('data-ip');
+      if (!confirm('Unblock ' + ip + '?')) return;
+      SW.fetchJson('/api/unblock', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ip: ip}) })
+        .then(function (r) {
+          SW.toast(r.success ? 'success' : 'error', r.message || (r.success ? 'IP unblocked' : 'Unblock failed'));
+          loadBlocked();
+        });
+    }
+  });
+
+  if (SW.socket) SW.socket.on('ip_blocked', loadBlocked);
+  loadBlocked();
+});
+</script>
+{% endblock %}

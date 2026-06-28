@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% block content %}
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+  <h1 class="page-title" style="margin:0">Alerts</h1>
+  <button class="btn btn-outline" id="btn-export-csv">Export CSV</button>
+</div>
+
+<div class="filter-bar">
+  <select id="filter-severity"><option value="">All Severities</option>
+    <option>CRITICAL</option><option>HIGH</option><option>MEDIUM</option><option>LOW</option>
+  </select>
+  <select id="filter-attack"><option value="">All Attack Types</option></select>
+  <select id="filter-hours">
+    <option value="1">Last 1 hour</option>
+    <option value="6">Last 6 hours</option>
+    <option value="24" selected>Last 24 hours</option>
+    <option value="168">Last 7 days</option>
+  </select>
+  <input type="text" id="filter-ip" placeholder="Search IP...">
+  <button class="btn btn-outline" id="btn-clear-filters">Clear Filters</button>
+</div>
+
+<div class="panel">
+  <div class="panel-body" style="padding:0">
+    <table id="alerts-table" class="data display" style="width:100%">
+      <thead>
+        <tr>
+          <th>ID</th><th>Time</th><th>Source IP</th><th>Dst IP</th><th>Attack Type</th>
+          <th>Severity</th><th>Confidence</th><th>Packets</th><th>Country</th><th>Blocked</th><th>Actions</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  let table;
+
+  function loadAlerts() {
+    const sev = document.getElementById('filter-severity').value;
+    const hours = document.getElementById('filter-hours').value;
+    let url = '/api/alerts?limit=500&hours=' + hours;
+    if (sev) url += '&severity=' + encodeURIComponent(sev);
+    SW.fetchJson(url).then(function (rows) {
+      const ipQ = document.getElementById('filter-ip').value.trim();
+      if (ipQ) rows = rows.filter(function (r) {
+        return (r.source_ip || '').indexOf(ipQ) >= 0;
+      });
+      const attackFilter = document.getElementById('filter-attack').value;
+      if (attackFilter) rows = rows.filter(function (r) { return r.attack_type === attackFilter; });
+
+      if (table) table.destroy();
+      const tbody = document.querySelector('#alerts-table tbody');
+      tbody.innerHTML = rows.map(function (a) {
+        return '<tr>' +
+          '<td class="mono">' + a.id + '</td>' +
+          '<td class="mono">' + SWTables.esc(a.timestamp) + '</td>' +
+          '<td class="mono">' + SWTables.esc(a.source_ip) + '</td>' +
+          '<td class="mono">' + SWTables.esc(a.destination_ip || '—') + '</td>' +
+          '<td>' + SWTables.esc(a.attack_type) + '</td>' +
+          '<td>' + SWTables.severityBadge(a.severity) + '</td>' +
+          '<td class="mono">' + a.confidence + '</td>' +
+          '<td class="mono">' + a.packet_count + '</td>' +
+          '<td>' + SWTables.esc(a.country_code || '—') + '</td>' +
+          '<td>' + (a.auto_blocked ? 'Yes' : 'No') + '</td>' +
+          '<td><button class="btn btn-sm btn-danger btn-block" data-ip="' + SWTables.esc(a.source_ip) + '">Block</button> ' +
+          '<button class="btn btn-sm btn-outline btn-resolve" data-id="' + a.id + '">Resolve</button></td>' +
+          '</tr>';
+      }).join('');
+
+      table = $('#alerts-table').DataTable({ pageLength: 25, order: [[0, 'desc']] });
+    });
+  }
+
+  SW.fetchJson('/api/attack-distribution').then(function (d) {
+    const sel = document.getElementById('filter-attack');
+    d.forEach(function (item) {
+      const o = document.createElement('option');
+      o.value = item.attack_type;
+      o.textContent = item.attack_type;
+      sel.appendChild(o);
+    });
+  });
+
+  document.getElementById('btn-clear-filters').addEventListener('click', function () {
+    document.getElementById('filter-severity').value = '';
+    document.getElementById('filter-attack').value = '';
+    document.getElementById('filter-ip').value = '';
+    loadAlerts();
+  });
+
+  ['filter-severity','filter-hours','filter-attack'].forEach(function (id) {
+    document.getElementById(id).addEventListener('change', loadAlerts);
+  });
+  document.getElementById('filter-ip').addEventListener('keyup', function (e) {
+    if (e.key === 'Enter') loadAlerts();
+  });
+
+  document.getElementById('btn-export-csv').addEventListener('click', function () {
+    SW.fetchJson('/api/alerts?limit=2000&hours=168').then(function (rows) {
+      const header = ['id','timestamp','source_ip','destination_ip','attack_type','severity','confidence','packet_count','country_code','auto_blocked'];
+      let csv = header.join(',') + '\n';
+      rows.forEach(function (r) {
+        csv += header.map(function (h) { return '"' + String(r[h] || '').replace(/"/g,'""') + '"'; }).join(',') + '\n';
+      });
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'shadowwatch_alerts.csv';
+      a.click();
+    });
+  });
+
+  document.addEventListener('click', function (e) {
+    if (e.target.classList.contains('btn-block')) {
+      const ip = e.target.getAttribute('data-ip');
+      if (!confirm('Block ' + ip + '?')) return;
+      SW.fetchJson('/api/block', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ip: ip, reason: 'Manual from alerts'}) })
+        .then(function (r) {
+          SW.toast(r.success ? 'success' : 'error', r.message || (r.success ? 'IP blocked' : 'Block failed'));
+          loadAlerts();
+        });
+    }
+    if (e.target.classList.contains('btn-resolve')) {
+      const id = e.target.getAttribute('data-id');
+      SW.fetchJson('/api/resolve', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({alert_id: parseInt(id,10)}) })
+        .then(function () { loadAlerts(); });
+    }
+  });
+
+  if (SW.socket) {
+    SW.socket.on('new_alert', function () { loadAlerts(); });
+  }
+
+  loadAlerts();
+});
+</script>
+{% endblock %}

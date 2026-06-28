@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="page-title">Settings</h1>
+<div id="settings-msg" class="alert-msg"></div>
+
+<form id="settings-form">
+  <div class="settings-section">
+    <h3>Detection Thresholds</h3>
+    <div class="grid-2">
+      <div class="form-group"><label>Time Window (s)</label><input name="TIME_WINDOW" type="number"></div>
+      <div class="form-group"><label>SYN Flood High</label><input name="SYN_FLOOD_THRESHOLD_HIGH" type="number"></div>
+      <div class="form-group"><label>SYN Flood Medium</label><input name="SYN_FLOOD_THRESHOLD_MEDIUM" type="number"></div>
+      <div class="form-group"><label>Port Scan High</label><input name="PORT_SCAN_THRESHOLD_HIGH" type="number"></div>
+      <div class="form-group"><label>Port Scan Medium</label><input name="PORT_SCAN_THRESHOLD_MEDIUM" type="number"></div>
+      <div class="form-group"><label>Port Scan Slow Window (s)</label><input name="PORT_SCAN_WINDOW_SLOW" type="number"></div>
+      <div class="form-group"><label>Brute Force Threshold</label><input name="BRUTE_FORCE_THRESHOLD" type="number"></div>
+      <div class="form-group"><label>Brute Force Window (s)</label><input name="BRUTE_FORCE_WINDOW" type="number"></div>
+      <div class="form-group"><label>ICMP Flood Threshold</label><input name="ICMP_FLOOD_THRESHOLD" type="number"></div>
+      <div class="form-group"><label>Anomaly Multiplier</label><input name="ANOMALY_MULTIPLIER" type="number" step="0.1"></div>
+    </div>
+  </div>
+
+  <div class="settings-section">
+    <h3>Auto-Block Settings</h3>
+    <div class="form-group">
+      <label><input type="checkbox" name="AUTO_BLOCK" id="auto-block-cb"> Enable Auto-Block</label>
+    </div>
+    <div class="form-group">
+      <label>Auto-Block Severities (comma-separated)</label>
+      <input name="AUTO_BLOCK_SEVERITY" id="auto-block-sev" placeholder="HIGH,CRITICAL">
+    </div>
+  </div>
+
+  <div class="settings-section">
+    <h3>Threat Intelligence</h3>
+    <div class="form-group">
+      <label>AbuseIPDB API Key</label>
+      <input name="ABUSEIPDB_API_KEY" type="password" placeholder="Leave empty to disable">
+    </div>
+  </div>
+
+  <div class="settings-section">
+    <h3>Network Interface</h3>
+    <div class="form-group">
+      <label>Capture Interface</label>
+      <select name="INTERFACE" id="iface-select"></select>
+    </div>
+  </div>
+
+  <button type="submit" class="btn">Save Settings</button>
+</form>
+
+<div class="settings-section" style="margin-top:24px">
+  <h3>Blacklist Editor</h3>
+  <div class="form-group">
+    <textarea id="blacklist-editor" rows="10"></textarea>
+  </div>
+  <button class="btn btn-outline" id="btn-save-blacklist">Save Blacklist</button>
+</div>
+
+<div class="settings-section">
+  <h3>System Actions</h3>
+  <button class="btn btn-outline" id="btn-clear-alerts">Clear All Alerts</button>
+  <button class="btn btn-outline" id="btn-export-db">Export Database</button>
+  <button class="btn" id="btn-restart-engine">Restart Engine</button>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  function msg(ok, text) {
+    const el = document.getElementById('settings-msg');
+    el.className = 'alert-msg show ' + (ok ? 'ok' : 'err');
+    el.textContent = text;
+    if (typeof SW !== 'undefined' && SW.toast) SW.toast(ok ? 'success' : 'error', text);
+  }
+
+  SW.fetchJson('/api/settings').then(function (s) {
+    const form = document.getElementById('settings-form');
+    Object.keys(s).forEach(function (k) {
+      const el = form.elements[k];
+      if (!el || k === 'interfaces') return;
+      if (k === 'AUTO_BLOCK') {
+        document.getElementById('auto-block-cb').checked = !!s.AUTO_BLOCK;
+      } else if (k === 'AUTO_BLOCK_SEVERITY') {
+        document.getElementById('auto-block-sev').value = (s.AUTO_BLOCK_SEVERITY || []).join(',');
+      } else if (k === 'BRUTE_FORCE_PORTS') {
+        /* not shown separately */
+      } else {
+        el.value = s[k] != null ? s[k] : '';
+      }
+    });
+    const sel = document.getElementById('iface-select');
+    sel.innerHTML = '<option value="">Auto-detect (recommended)</option>';
+    (s.interfaces || []).forEach(function (iface) {
+      const o = document.createElement('option');
+      o.value = iface.id || iface;
+      o.textContent = iface.label || iface.id || iface;
+      if (s.INTERFACE === (iface.id || iface)) o.selected = true;
+      sel.appendChild(o);
+    });
+    if ((s.interfaces || []).length === 0) {
+      msg(false, 'No interfaces found. Run app as Administrator and ensure Npcap is installed.');
+    } else if (s.local_ip) {
+      msg(true, 'LAN IP: ' + s.local_ip + ' — pick the adapter marked "(active — use this)", Save, then Restart Engine.');
+    }
+  }).catch(function () {
+    msg(false, 'Could not load settings. Is python app.py running?');
+  });
+
+  SW.fetchJson('/api/blacklist').then(function (d) {
+    document.getElementById('blacklist-editor').value = d.content || '';
+  });
+
+  document.getElementById('settings-form').addEventListener('submit', function (e) {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const body = {};
+    fd.forEach(function (v, k) { body[k] = v; });
+    body.AUTO_BLOCK = document.getElementById('auto-block-cb').checked;
+    body.AUTO_BLOCK_SEVERITY = document.getElementById('auto-block-sev').value.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+    ['TIME_WINDOW','SYN_FLOOD_THRESHOLD_HIGH','SYN_FLOOD_THRESHOLD_MEDIUM','PORT_SCAN_THRESHOLD_HIGH',
+     'PORT_SCAN_THRESHOLD_MEDIUM','PORT_SCAN_WINDOW_SLOW','BRUTE_FORCE_THRESHOLD','BRUTE_FORCE_WINDOW','ICMP_FLOOD_THRESHOLD'
+    ].forEach(function (k) { if (body[k] !== undefined) body[k] = parseInt(body[k], 10); });
+    if (body.ANOMALY_MULTIPLIER) body.ANOMALY_MULTIPLIER = parseFloat(body.ANOMALY_MULTIPLIER);
+    SW.fetchJson('/api/settings', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) })
+      .then(function () { msg(true, 'Settings saved. Restart engine to apply interface changes.'); })
+      .catch(function () { msg(false, 'Save failed'); });
+  });
+
+  document.getElementById('btn-save-blacklist').addEventListener('click', function () {
+    const content = document.getElementById('blacklist-editor').value;
+    SW.fetchJson('/api/blacklist', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({content: content}) })
+      .then(function () { msg(true, 'Blacklist saved.'); });
+  });
+
+  document.getElementById('btn-clear-alerts').addEventListener('click', function () {
+    if (!confirm('Delete ALL alerts?')) return;
+    SW.fetchJson('/api/alerts/clear', { method: 'POST' }).then(function () { msg(true, 'Alerts cleared.'); });
+  });
+  document.getElementById('btn-export-db').addEventListener('click', function () {
+    window.location.href = '/api/export/db';
+  });
+  document.getElementById('btn-restart-engine').addEventListener('click', function () {
+    SW.fetchJson('/api/engine/restart', { method: 'POST' }).then(function () {
+      msg(true, 'Engine restarted.');
+    }).catch(function () { msg(false, 'Engine restart failed.'); });
+  });
+});
+</script>
+{% endblock %}

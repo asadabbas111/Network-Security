@@ -1,0 +1,205 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="kpi-row">
+  <div class="kpi-card">
+    <div class="kpi-label">Uptime</div>
+    <div class="kpi-value mono" id="kpi-uptime">00:00:00</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Packets Captured</div>
+    <div class="kpi-value mono" id="kpi-packets">0</div>
+    <div class="kpi-sub" id="kpi-pps">0 pkt/s</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Threats Detected</div>
+    <div class="kpi-value red mono" id="kpi-threats">0</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">IPs Blocked</div>
+    <div class="kpi-value orange mono" id="kpi-blocked">0</div>
+  </div>
+</div>
+
+<div class="pipeline" id="pipeline">
+  <div class="pipe-box active" data-stage="network"><div>⬡</div>Network</div>
+  <div class="pipe-connector active"><span class="pipe-dot"></span></div>
+  <div class="pipe-box active" data-stage="sniffer"><div>◎</div>Sniffer</div>
+  <div class="pipe-connector active"><span class="pipe-dot"></span></div>
+  <div class="pipe-box active" data-stage="detector"><div>⚠</div>Detector</div>
+  <div class="pipe-connector active"><span class="pipe-dot"></span></div>
+  <div class="pipe-box" data-stage="intel"><div>◈</div>Threat Intel</div>
+  <div class="pipe-connector"><span class="pipe-dot"></span></div>
+  <div class="pipe-box" data-stage="responder"><div>⊘</div>Responder</div>
+  <div class="pipe-connector"><span class="pipe-dot"></span></div>
+  <div class="pipe-box active" data-stage="logger"><div>▤</div>Logger</div>
+  <div class="pipe-connector active"><span class="pipe-dot"></span></div>
+  <div class="pipe-box active" data-stage="dashboard"><div>▣</div>Dashboard</div>
+</div>
+
+<div class="grid-2">
+  <div class="panel">
+    <div class="panel-header">Live Alerts</div>
+    <div class="panel-body" style="padding:0">
+      <table class="data">
+        <thead><tr><th>Sev</th><th>Source IP</th><th>Attack</th><th>Time</th></tr></thead>
+        <tbody id="live-alerts-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="panel-header">Attack Distribution</div>
+    <div class="panel-body">
+      <div id="attack-bars"></div>
+      <div class="sev-grid">
+        <div class="sev-mini"><div class="label">Critical</div><div class="val" id="sev-critical">0</div></div>
+        <div class="sev-mini"><div class="label">High</div><div class="val" id="sev-high">0</div></div>
+        <div class="sev-mini"><div class="label">Medium</div><div class="val" id="sev-medium">0</div></div>
+        <div class="sev-mini"><div class="label">Low</div><div class="val" id="sev-low">0</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="grid-2">
+  <div class="panel">
+    <div class="panel-header">Packet Stream</div>
+    <div class="panel-body" style="padding:0;max-height:220px;overflow-y:auto">
+      <table class="data">
+        <thead><tr><th>Proto</th><th>Flow</th><th>Port</th><th>Flags</th><th>Size</th></tr></thead>
+        <tbody id="packet-stream-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="panel-header">Threat Intel</div>
+    <div class="panel-body" style="padding:0">
+      <table class="data">
+        <thead><tr><th>IP</th><th>CC</th><th>ASN</th><th>Score</th></tr></thead>
+        <tbody id="intel-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="grid-3">
+  <div class="panel">
+    <div class="panel-header">Alert Timeline (24h)</div>
+    <div class="panel-body">
+      <svg class="timeline-svg" id="timeline-svg"></svg>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="panel-header">Activity Heatmap</div>
+    <div class="panel-body" id="heatmap-container"></div>
+  </div>
+  <div class="panel">
+    <div class="panel-header">Blocked IPs</div>
+    <div class="panel-body">
+      <ul class="blocked-list" id="blocked-list"></ul>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  const timelinePoints = [];
+  const intelSeen = {};
+
+  function refreshDashboard() {
+    SW.fetchJson('/api/attack-distribution').then(function (d) {
+      SWCharts.renderBarChart('attack-bars', d);
+    });
+    SW.fetchJson('/api/timeline?hours=24').then(function (d) {
+      timelinePoints.length = 0;
+      d.forEach(function (p) { timelinePoints.push(p); });
+      SWCharts.renderTimelineSvg('timeline-svg', timelinePoints);
+    });
+    SW.fetchJson('/api/heatmap').then(function (d) {
+      SWCharts.renderHeatmap('heatmap-container', d.grid);
+    });
+    SW.fetchJson('/api/blocked').then(function (rows) {
+      const ul = document.getElementById('blocked-list');
+      ul.innerHTML = '';
+      if (!rows.length) {
+        ul.innerHTML = '<li class="muted">No blocked IPs</li>';
+        return;
+      }
+      rows.slice(0, 8).forEach(function (r) {
+        const li = document.createElement('li');
+        li.className = (r.blocked_by || '').toUpperCase() === 'AUTO' ? 'auto' : 'manual';
+        li.innerHTML =
+          '<span class="mono">' + SWTables.esc(r.ip_address) + '</span>' +
+          '<span><span class="blocked-badge">' + SWTables.esc(r.blocked_by) + '</span> ' +
+          '<span class="muted mono" style="font-size:9px">' + SWTables.esc(r.blocked_at) + '</span></span>';
+        ul.appendChild(li);
+      });
+    });
+    SW.fetchJson('/api/packets?limit=12').then(function (pkts) {
+      const tb = document.getElementById('packet-stream-tbody');
+      tb.innerHTML = pkts.map(SWTables.packetRow).join('');
+    });
+    SW.fetchJson('/api/alerts?limit=8').then(function (alerts) {
+      const tb = document.getElementById('live-alerts-tbody');
+      tb.innerHTML = alerts.map(SWTables.alertRow).join('');
+    });
+  }
+
+  if (SW.socket) {
+    SW.socket.on('stats_update', function (s) {
+      document.getElementById('kpi-uptime').textContent = SW.formatUptime(s.uptime_seconds);
+      document.getElementById('kpi-packets').textContent = s.packets_captured;
+      document.getElementById('kpi-pps').textContent = s.pps + ' pkt/s';
+      document.getElementById('kpi-threats').textContent = s.threats_total;
+      document.getElementById('kpi-blocked').textContent = s.blocked_total;
+      SWCharts.renderSeverityGrid(s.severity_counts);
+      const eng = document.getElementById('status-engine-bar');
+      if (eng) eng.textContent = 'RUNNING';
+    });
+    SW.socket.on('new_alert', function (a) {
+      SWTables.prependRow('live-alerts-tbody', SWTables.alertRow(a), true);
+      document.getElementById('kpi-threats').textContent =
+        parseInt(document.getElementById('kpi-threats').textContent, 10) + 1;
+      if (!intelSeen[a.source_ip]) {
+        intelSeen[a.source_ip] = true;
+        const intel = a.intel || {};
+        SWTables.prependRow('intel-tbody', SWTables.intelRow(a.source_ip, intel), false);
+      }
+      activatePipeline('intel');
+      activatePipeline('responder');
+      refreshDashboard();
+    });
+    SW.socket.on('ip_blocked', function () {
+      refreshDashboard();
+    });
+    var lastPacketRefresh = 0;
+    SW.socket.on('traffic_data', function () {
+      var now = Date.now();
+      if (now - lastPacketRefresh < 2000) return;
+      lastPacketRefresh = now;
+      SW.fetchJson('/api/packets?limit=8').then(function (pkts) {
+        const tb = document.getElementById('packet-stream-tbody');
+        if (pkts.length) tb.innerHTML = pkts.map(SWTables.packetRow).join('');
+      });
+    });
+  }
+
+  function activatePipeline(stage) {
+    document.querySelectorAll('.pipe-box[data-stage="' + stage + '"]').forEach(function (el) {
+      el.classList.add('active');
+    });
+  }
+
+  refreshDashboard();
+  setInterval(refreshDashboard, 15000);
+  setInterval(function () {
+    SW.fetchJson('/api/timeline?hours=24').then(function (d) {
+      timelinePoints.length = 0;
+      d.forEach(function (p) { timelinePoints.push(p); });
+      SWCharts.renderTimelineSvg('timeline-svg', timelinePoints);
+    });
+  }, 8000);
+});
+</script>
+{% endblock %}

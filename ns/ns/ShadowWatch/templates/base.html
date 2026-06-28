@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ title }} — {{ app_name }}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/datatables/1.10.21/css/jquery.dataTables.min.css">
+  {% block head %}{% endblock %}
+</head>
+<body>
+<div class="app-shell">
+  <header class="titlebar">
+    <div class="titlebar-left">
+      <svg class="titlebar-logo" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M12 2L4 6v6c0 5 3.4 9.7 8 11 4.6-1.3 8-6 8-11V6l-8-4z" stroke="#ffffff" stroke-width="1.5" fill="#333"/>
+        <path d="M9 12l2 2 4-4" stroke="#27ae60" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+      <span class="titlebar-brand">{{ app_name }}</span>
+      <span class="titlebar-sub">{{ app_subtitle }}</span>
+    </div>
+    <div class="titlebar-center">
+      <span><span class="status-dot" id="engine-dot"></span><span id="status-engine">RUNNING</span></span>
+      <span>IF: <span class="mono" id="iface-name">—</span></span>
+      <span class="mono" id="utc-clock">00:00:00 UTC</span>
+    </div>
+    <div class="titlebar-right">
+      <button class="btn-tb" id="btn-stop">Stop</button>
+      <button class="btn-tb" id="btn-export">Export</button>
+    </div>
+  </header>
+
+  <div id="toast-container" class="toast-container" aria-live="polite"></div>
+
+  <div class="body-row">
+    <nav class="sidebar">
+      <div class="nav-section">
+        <div class="nav-section-label">Monitor</div>
+        <a href="/" class="nav-item {% if page == 'dashboard' %}active{% endif %}">Dashboard</a>
+        <a href="/traffic" class="nav-item {% if page == 'traffic' %}active{% endif %}">Traffic</a>
+        <a href="/alerts" class="nav-item {% if page == 'alerts' %}active{% endif %}">Alerts</a>
+      </div>
+      <div class="nav-section">
+        <div class="nav-section-label">Response</div>
+        <a href="/blocked" class="nav-item {% if page == 'blocked' %}active{% endif %}">Blocked IPs</a>
+      </div>
+      <div class="nav-section">
+        <div class="nav-section-label">Analysis</div>
+        <a href="/analytics" class="nav-item {% if page == 'analytics' %}active{% endif %}">Analytics</a>
+      </div>
+      <div class="nav-section">
+        <div class="nav-section-label">System</div>
+        <a href="/settings" class="nav-item {% if page == 'settings' %}active{% endif %}">Settings</a>
+      </div>
+      <div class="sidebar-stats">
+        <div>Capture Stats</div>
+        <span class="mono" id="stat-tcp">TCP: 0</span>
+        <span class="mono" id="stat-udp">UDP: 0</span>
+        <span class="mono" id="stat-icmp">ICMP: 0</span>
+      </div>
+    </nav>
+
+    <main class="main-content">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+
+  <footer class="statusbar">
+    <div>
+      <span>CPU: <span class="mono" id="status-cpu">—</span></span>
+      <span>MEM: <span class="mono" id="status-mem">—</span></span>
+      <span>DB: <span class="mono" id="status-db">—</span></span>
+    </div>
+    <div>
+      <span>Engine: <span class="mono" id="status-engine-bar">RUNNING</span></span>
+      <span>{{ app_name }} {{ app_version }} — Air University, Dept. of Cyber Security</span>
+    </div>
+  </footer>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/datatables/1.10.21/js/jquery.dataTables.min.js"></script>
+<script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+<script src="{{ url_for('static', filename='js/charts.js') }}"></script>
+<script src="{{ url_for('static', filename='js/tables.js') }}"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

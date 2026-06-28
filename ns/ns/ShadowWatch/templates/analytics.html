@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="page-title">Analytics</h1>
+
+<div class="grid-3">
+  <div class="panel">
+    <div class="panel-header">Attack Types</div>
+    <div class="panel-body"><div class="chart-container"><canvas id="chart-doughnut"></canvas></div></div>
+  </div>
+  <div class="panel">
+    <div class="panel-header">Severity Over Time</div>
+    <div class="panel-body"><div class="chart-container"><canvas id="chart-severity-line"></canvas></div></div>
+  </div>
+  <div class="panel">
+    <div class="panel-header">Top 10 Attackers</div>
+    <div class="panel-body"><div class="chart-container"><canvas id="chart-attackers"></canvas></div></div>
+  </div>
+</div>
+
+<div class="grid-2">
+  <div class="panel">
+    <div class="panel-header">7-Day Attack Volume</div>
+    <div class="panel-body"><div class="chart-container tall"><canvas id="chart-stacked"></canvas></div></div>
+  </div>
+  <div class="panel">
+    <div class="panel-header">Summary Statistics</div>
+    <div class="panel-body">
+      <table class="data" id="summary-table">
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  Promise.all([
+    SW.fetchJson('/api/attack-distribution?hours=168'),
+    SW.fetchJson('/api/timeline?hours=168'),
+    SW.fetchJson('/api/top-attackers?limit=10'),
+    SW.fetchJson('/api/stats'),
+    SW.fetchJson('/api/alerts?limit=5000&hours=168')
+  ]).then(function (results) {
+    const dist = results[0];
+    const timeline = results[1];
+    const attackers = results[2];
+    const stats = results[3];
+    const alerts = results[4];
+
+    new Chart(document.getElementById('chart-doughnut'), {
+      type: 'doughnut',
+      data: {
+        labels: dist.map(function (d) { return d.attack_type; }),
+        datasets: [{ data: dist.map(function (d) { return d.count; }), backgroundColor: ['#1a1a1a','#555555','#999999','#cccccc','#333333'] }]
+      },
+      options: { plugins: { legend: { position: 'bottom', labels: { font: { size: 10 } } } } }
+    });
+
+    new Chart(document.getElementById('chart-severity-line'), {
+      type: 'line',
+      data: {
+        labels: timeline.map(function (t) { return (t.hour || '').substr(5, 11); }),
+        datasets: [{ label: 'Alerts', data: timeline.map(function (t) { return t.count; }), borderColor: '#1a1a1a', fill: false, tension: 0.3 }]
+      },
+      options: { scales: { x: { ticks: { maxTicksLimit: 8, font: { size: 9 } } } } }
+    });
+
+    new Chart(document.getElementById('chart-attackers'), {
+      type: 'bar',
+      data: {
+        labels: attackers.map(function (a) { return a.ip; }),
+        datasets: [{ label: 'Alerts', data: attackers.map(function (a) { return a.count; }), backgroundColor: '#1a1a1a' }]
+      },
+      options: { indexAxis: 'y', plugins: { legend: { display: false } } }
+    });
+
+    const byDay = {};
+    const types = {};
+    alerts.forEach(function (a) {
+      const day = (a.timestamp || '').substr(0, 10);
+      byDay[day] = byDay[day] || {};
+      byDay[day][a.attack_type] = (byDay[day][a.attack_type] || 0) + 1;
+      types[a.attack_type] = true;
+    });
+    const days = Object.keys(byDay).sort();
+    const typeList = Object.keys(types);
+    const datasets = typeList.map(function (t, i) {
+      const colors = ['#1a1a1a','#555555','#999999','#cccccc'];
+      return { label: t, data: days.map(function (d) { return (byDay[d] && byDay[d][t]) || 0; }), backgroundColor: colors[i % colors.length], stack: 'attacks' };
+    });
+    new Chart(document.getElementById('chart-stacked'), {
+      type: 'line',
+      data: { labels: days, datasets: datasets },
+      options: { scales: { x: { stacked: true }, y: { stacked: true } } }
+    });
+
+    const sc = stats.severity_counts || {};
+    document.querySelector('#summary-table tbody').innerHTML =
+      '<tr><td>Total Alerts</td><td class="mono">' + stats.threats_total + '</td></tr>' +
+      '<tr><td>Blocked IPs</td><td class="mono">' + stats.blocked_total + '</td></tr>' +
+      '<tr><td>Critical</td><td class="mono">' + (sc.CRITICAL||0) + '</td></tr>' +
+      '<tr><td>High</td><td class="mono">' + (sc.HIGH||0) + '</td></tr>' +
+      '<tr><td>Medium</td><td class="mono">' + (sc.MEDIUM||0) + '</td></tr>' +
+      '<tr><td>Low</td><td class="mono">' + (sc.LOW||0) + '</td></tr>';
+  });
+});
+</script>
+{% endblock %}

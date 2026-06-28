@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="page-title">Traffic Monitor</h1>
+
+<div class="panel">
+  <div class="panel-header">Live Throughput (60s)</div>
+  <div class="panel-body">
+    <div class="chart-container"><canvas id="traffic-chart"></canvas></div>
+  </div>
+</div>
+
+<div class="metric-cards">
+  <div class="metric-card">
+    <div class="label">Current pkt/s</div>
+    <div class="val" id="m-pps">0</div>
+  </div>
+  <div class="metric-card">
+    <div class="label">Current MB/s</div>
+    <div class="val" id="m-mbps">0</div>
+  </div>
+  <div class="metric-card">
+    <div class="label">Protocols (TCP/UDP/ICMP)</div>
+    <div class="val" id="m-proto" style="font-size:14px">0 / 0 / 0</div>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="panel-header">Live Packet Stream</div>
+  <div class="panel-body" style="padding:0;max-height:400px;overflow-y:auto">
+    <table class="data">
+      <thead><tr><th>Proto</th><th>Flow</th><th>Port</th><th>Flags</th><th>Size</th><th>Time</th></tr></thead>
+      <tbody id="traffic-packets"></tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  const chart = SWCharts.initTrafficChart('traffic-chart');
+  let lastIds = {};
+
+  function refreshPackets() {
+    SW.fetchJson('/api/packets?limit=30').then(function (pkts) {
+      const tb = document.getElementById('traffic-packets');
+      const html = pkts.map(function (p) {
+        const key = p.src_ip + p.dst_ip + p.timestamp;
+        const hl = !lastIds[key];
+        lastIds[key] = true;
+        const row = '<tr' + (hl ? ' class="row-highlight"' : '') + '>' +
+          '<td>' + SWTables.protoTag(p.protocol) + '</td>' +
+          '<td class="mono" style="font-size:10px">' + SWTables.esc(p.src_ip) + ' → ' + SWTables.esc(p.dst_ip) + '</td>' +
+          '<td class="mono">' + SWTables.esc(p.dst_port || '—') + '</td>' +
+          '<td>' + SWTables.formatFlags(p.flags) + '</td>' +
+          '<td class="mono">' + p.packet_size + ' B</td>' +
+          '<td class="mono">' + new Date(p.timestamp * 1000).toISOString().substr(11,8) + '</td></tr>';
+        return row;
+      }).join('');
+      tb.innerHTML = html;
+    });
+  }
+
+  if (SW.socket) {
+    SW.socket.on('traffic_data', function (d) {
+      document.getElementById('m-pps').textContent = d.pps;
+      document.getElementById('m-mbps').textContent = d.mbps;
+      document.getElementById('m-proto').textContent = d.tcp_count + ' / ' + d.udp_count + ' / ' + d.icmp_count;
+      SWCharts.pushTrafficPoint(chart, d.pps, d.mbps);
+      refreshPackets();
+    });
+  }
+
+  refreshPackets();
+  setInterval(refreshPackets, 1000);
+});
+</script>
+{% endblock %}
